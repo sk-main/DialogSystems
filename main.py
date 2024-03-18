@@ -9,46 +9,81 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import normalize
 from collections import defaultdict
 
-# full documentation - https://huggingface.co/sentence-transformers
-MODEL_NAME = 'all-MiniLM-L6-v2'
-model = SentenceTransformer(MODEL_NAME)
-
 
 def embed_requests(requests):
     # Load Sentence Transformer model
-    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+    model = SentenceTransformer('all-MiniLM-L6-v2')
     # Convert requests to embeddings
     request_embeddings = model.encode(requests, show_progress_bar=True)
     # Normalize embeddings
     return normalize(request_embeddings)
 
-def cluster_requests(request_embeddings, min_size):
-    # Determine optimal number of clusters (optional)
-    # You may want to tune this hyperparameter based on your data
-    # For simplicity, let's use silhouette score
-    best_score = -1
-    best_k = 2
-    for k in range(2, min(11, len(request_embeddings) + 1)):
-        kmeans = KMeans(n_clusters=k, random_state=42)
-        cluster_labels = kmeans.fit_predict(request_embeddings)
-        silhouette_avg = silhouette_score(request_embeddings, cluster_labels)
-        if silhouette_avg > best_score:
-            best_score = silhouette_avg
-            best_k = k
+def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
+    # Calculate distances to each cluster centroid
+    distances = [np.linalg.norm(request_embedding - centroid) for centroid in cluster_centers]
+    # Find the closest cluster
+    closest_cluster_idx = np.argmin(distances)
+    # Check if the distance is within the similarity threshold
+    if distances[closest_cluster_idx] <= similarity_threshold:
+        return closest_cluster_idx  # Assign to existing cluster
+    else:
+        return None  # Request initiates its own cluster
 
-    # Perform K-means clustering
-    kmeans = KMeans(n_clusters=best_k, random_state=42)
-    cluster_labels = kmeans.fit_predict(request_embeddings)
+def cluster_requests(request_embeddings, min_size):
+    # Initialize clusters and cluster centers
+    clusters = defaultdict(list)
+    cluster_centers = []
 
     # Assign requests to clusters
-    clusters = defaultdict(list)
-    for idx, label in enumerate(cluster_labels):
-        clusters[label].append(idx)
+    for idx, request_embedding in enumerate(request_embeddings):
+        cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+        if cluster_idx is not None:
+            clusters[cluster_idx].append(idx)  # Assign to existing cluster
+            # Update cluster centroid
+            cluster_centers[cluster_idx] = np.mean(request_embeddings[clusters[cluster_idx]], axis=0)
+        else:
+            # Initiate new cluster
+            clusters[len(cluster_centers)].append(idx)
+            cluster_centers.append(request_embedding)
 
-    # Filter clusters based on min_size
-    filtered_clusters = {label: cluster for label, cluster in clusters.items() if len(cluster) >= int(min_size)}
 
-    return filtered_clusters, kmeans.cluster_centers_
+    return clusters, cluster_centers
+
+
+
+
+
+
+
+
+
+
+    # # Determine optimal number of clusters (optional)
+    # # You may want to tune this hyperparameter based on your data
+    # # For simplicity, let's use silhouette score
+    # best_score = -1
+    # best_k = 2
+    # for k in range(2, min(11, len(request_embeddings) + 1)):
+    #     kmeans = KMeans(n_clusters=k, random_state=42)
+    #     cluster_labels = kmeans.fit_predict(request_embeddings)
+    #     silhouette_avg = silhouette_score(request_embeddings, cluster_labels)
+    #     if silhouette_avg > best_score:
+    #         best_score = silhouette_avg
+    #         best_k = k
+    #
+    # # Perform K-means clustering
+    # kmeans = KMeans(n_clusters=best_k, random_state=42)
+    # cluster_labels = kmeans.fit_predict(request_embeddings)
+    #
+    # # Assign requests to clusters
+    # clusters = defaultdict(list)
+    # for idx, label in enumerate(cluster_labels):
+    #     clusters[label].append(idx)
+    #
+    # # Filter clusters based on min_size
+    # filtered_clusters = {label: cluster for label, cluster in clusters.items() if len(cluster) >= int(min_size)}
+    #
+    # return filtered_clusters, kmeans.cluster_centers_
 
 def label_clusters(requests, clusters, cluster_centers, request_embeddings):
     # Label clusters
