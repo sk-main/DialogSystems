@@ -8,6 +8,37 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import normalize
 from collections import defaultdict
+from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.feature_extraction.text import CountVectorizer
+import csv
+
+
+def label_clusters_with_lda(requests, request_embeddings, clusters):
+    # Convert requests to text format
+    request_texts = [' '.join(request.split()) for request in requests]
+
+    # Vectorize the text data using a simple bag-of-words approach
+    vectorizer = CountVectorizer(max_df=0.95, min_df=2, stop_words='english')
+    X = vectorizer.fit_transform(request_texts)
+
+    # Apply Latent Dirichlet Allocation (LDA) to discover topics
+    lda = LatentDirichletAllocation(n_components=len(clusters), random_state=42)
+    lda.fit(X)
+
+    # Get the most probable words for each topic
+    feature_names = vectorizer.get_feature_names_out()
+    topic_keywords = []
+    for topic_idx, topic in enumerate(lda.components_):
+        top_keywords_idx = topic.argsort()[::-1][:5]  # Top 5 keywords for each topic
+        top_keywords = [feature_names[i] for i in top_keywords_idx]
+        topic_keywords.append(top_keywords)
+
+    # Assign topic keywords as labels to clusters
+    cluster_labels = {}
+    for label, indices in clusters.items():
+        cluster_labels[label] = ', '.join(topic_keywords[label])
+
+    return cluster_labels
 
 
 def embed_requests(requests):
@@ -15,8 +46,10 @@ def embed_requests(requests):
     model = SentenceTransformer('all-MiniLM-L6-v2')
     # Convert requests to embeddings
     request_embeddings = model.encode(requests, show_progress_bar=True)
+    request_embeddings = request_embeddings.reshape(-1, 1)
     # Normalize embeddings
     return normalize(request_embeddings)
+
 
 def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
     # Calculate distances to each cluster centroid
@@ -29,10 +62,12 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
     else:
         return None  # Request initiates its own cluster
 
+
 def cluster_requests(request_embeddings, min_size):
     # Initialize clusters and cluster centers
-    clusters = defaultdict(list)
-    cluster_centers = []
+    clusters = {0: [0]}
+    cluster_centers = [request_embeddings[0]]
+    similarity_threshold = 0.5
 
     # Assign requests to clusters
     for idx, request_embedding in enumerate(request_embeddings):
@@ -46,44 +81,8 @@ def cluster_requests(request_embeddings, min_size):
             clusters[len(cluster_centers)].append(idx)
             cluster_centers.append(request_embedding)
 
-
     return clusters, cluster_centers
 
-
-
-
-
-
-
-
-
-
-    # # Determine optimal number of clusters (optional)
-    # # You may want to tune this hyperparameter based on your data
-    # # For simplicity, let's use silhouette score
-    # best_score = -1
-    # best_k = 2
-    # for k in range(2, min(11, len(request_embeddings) + 1)):
-    #     kmeans = KMeans(n_clusters=k, random_state=42)
-    #     cluster_labels = kmeans.fit_predict(request_embeddings)
-    #     silhouette_avg = silhouette_score(request_embeddings, cluster_labels)
-    #     if silhouette_avg > best_score:
-    #         best_score = silhouette_avg
-    #         best_k = k
-    #
-    # # Perform K-means clustering
-    # kmeans = KMeans(n_clusters=best_k, random_state=42)
-    # cluster_labels = kmeans.fit_predict(request_embeddings)
-    #
-    # # Assign requests to clusters
-    # clusters = defaultdict(list)
-    # for idx, label in enumerate(cluster_labels):
-    #     clusters[label].append(idx)
-    #
-    # # Filter clusters based on min_size
-    # filtered_clusters = {label: cluster for label, cluster in clusters.items() if len(cluster) >= int(min_size)}
-    #
-    # return filtered_clusters, kmeans.cluster_centers_
 
 def label_clusters(requests, clusters, cluster_centers, request_embeddings):
     # Label clusters
@@ -114,7 +113,11 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     #  todo: the final outcome is the json file with clustering results saved as output_file
 
     with open(data_file, 'r') as file:
-        requests = [line.strip() for line in file]
+        reader = csv.reader(file)
+        for row in reader:
+            requests = row[1]
+
+
 
     # Embed requests
     request_embeddings = embed_requests(requests)
@@ -123,17 +126,32 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
 
     # Label clusters
-    cluster_labels = label_clusters(requests, clusters, cluster_centers, request_embeddings)
+    cluster_labels = label_clusters_with_lda(requests, request_embeddings, clusters)
 
-    cluster_labels_str = {str(key): value for key, value in cluster_labels.items()}
+    # Prepare JSON structure for clusters
+    cluster_list = []
+    for label, indices in clusters.items():
+        if len(indices) >= int(min_size):
+            cluster_data = {}
+            cluster_data["cluster_name"] = cluster_labels[label]  # Use LDA topic keywords as the cluster name
+            cluster_data["requests"] = [requests[idx] for idx in indices]  # List of requests in the cluster
+            cluster_list.append(cluster_data)
+
+    # Prepare JSON structure for unclustered requests
+    unclustered = []
+    for label, indices in clusters.items():
+        if len(indices) < int(min_size):
+            unclustered.extend([requests[idx] for idx in indices])
+
+    # Create final JSON data with cluster_list and unclustered sections
+    json_data = {"cluster_list": cluster_list}
+    if unclustered:
+        json_data["unclustered"] = unclustered
 
     # Save results to output file
     with open(output_file, 'w') as file:
-        json.dump(cluster_labels_str, file, indent=4)
+        json.dump(json_data, file, indent=4)
 
-
-
-    pass
 
 
 if __name__ == '__main__':
