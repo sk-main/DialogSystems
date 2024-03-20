@@ -10,7 +10,36 @@ from sklearn.preprocessing import normalize
 from collections import defaultdict
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 import csv
+
+def label_clusters_with_tfidf(requests, request_embeddings, clusters):
+    # Convert requests to text format
+    request_texts = [' '.join(request.split()) for request in requests]
+
+    # Vectorize the text data using TF-IDF with bigrams
+    tfidf_vectorizer = TfidfVectorizer(stop_words='english', token_pattern=r'\b\w+\b', ngram_range=(1, 2))
+    X_tfidf = tfidf_vectorizer.fit_transform(request_texts)
+
+    # Get feature names (vocabulary) from the vectorizer
+    feature_names = tfidf_vectorizer.get_feature_names_out()
+
+    # Get top keywords for each cluster based on TF-IDF scores
+    cluster_labels = {}
+    for label, indices in clusters.items():
+        # Calculate mean TF-IDF scores for each term across documents in the cluster
+        cluster_tfidf_scores = X_tfidf[indices].mean(axis=0)
+
+        # Get indices of top TF-IDF scores
+        top_tfidf_indices = cluster_tfidf_scores.argsort()[0, ::-1][:5]  # Top 5 keywords for each cluster
+
+        # Get corresponding feature names (words) for top TF-IDF indices
+        top_keywords = [feature_names[idx] for idx in top_tfidf_indices]
+
+        # Join top keywords to create cluster label
+        cluster_labels[label] = ', '.join(top_keywords)
+
+    return cluster_labels
 
 
 def label_clusters_with_lda(requests, request_embeddings, clusters):
@@ -18,7 +47,9 @@ def label_clusters_with_lda(requests, request_embeddings, clusters):
     request_texts = [' '.join(request.split()) for request in requests]
 
     # Vectorize the text data using a simple bag-of-words approach
-    vectorizer = CountVectorizer(max_df=0.95, min_df=2, stop_words='english')
+    # vectorizer = CountVectorizer(max_df=0.95, min_df=2, stop_words='english')
+    vectorizer = CountVectorizer(stop_words='english', token_pattern=r'\b\w+\b')
+
     X = vectorizer.fit_transform(request_texts)
 
     # Apply Latent Dirichlet Allocation (LDA) to discover topics
@@ -65,20 +96,20 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
 
 def cluster_requests(request_embeddings, min_size):
     # Initialize clusters and cluster centers
-    clusters = {0: [0]}
+    clusters = defaultdict(list)
     cluster_centers = [request_embeddings[0]]
     similarity_threshold = 0.5
 
     # Assign requests to clusters
-    for idx, request_embedding in enumerate(request_embeddings):
+    for request, request_embedding in enumerate(request_embeddings):
         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
         if cluster_idx is not None:
-            clusters[cluster_idx].append(idx)  # Assign to existing cluster
+            clusters[cluster_idx].append(request)  # Assign to existing cluster
             # Update cluster centroid
             cluster_centers[cluster_idx] = np.mean(request_embeddings[clusters[cluster_idx]], axis=0)
         else:
             # Initiate new cluster
-            clusters[len(cluster_centers)].append(idx)
+            clusters[len(cluster_centers)].append(request)
             cluster_centers.append(request_embedding)
 
     return clusters, cluster_centers
@@ -126,7 +157,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
 
     # Label clusters
-    cluster_labels = label_clusters_with_lda(requests, request_embeddings, clusters)
+    cluster_labels = label_clusters_with_tfidf(requests, request_embeddings, clusters)
 
     # Prepare JSON structure for clusters
     cluster_list = []
