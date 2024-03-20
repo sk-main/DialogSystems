@@ -13,6 +13,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 import csv
 
+
 def label_clusters_with_tfidf(requests, request_embeddings, clusters):
     # Convert requests to text format
     request_texts = [' '.join(request.split()) for request in requests]
@@ -77,7 +78,6 @@ def embed_requests(requests):
     model = SentenceTransformer('all-MiniLM-L6-v2')
     # Convert requests to embeddings
     request_embeddings = model.encode(requests, show_progress_bar=True)
-    request_embeddings = request_embeddings.reshape(-1, 1)
     # Normalize embeddings
     return normalize(request_embeddings)
 
@@ -136,19 +136,27 @@ def label_clusters(requests, clusters, cluster_centers, request_embeddings):
     return cluster_labels
 
 
+def temp_label(clusters):
+    labeled_clusters = {}
+    label_counter = 1
+    for cluster_idx, requests in clusters.items():
+        labeled_clusters[label_counter] = requests
+        label_counter += 1
+    return labeled_clusters
+
+
 def analyze_unrecognized_requests(data_file, output_file, min_size):
     # todo: implement this function
     #  you are encouraged to break the functionality into multiple functions,
     #  but don't split your code into multiple *.py files
     #
     #  todo: the final outcome is the json file with clustering results saved as output_file
-
+    requests = []
     with open(data_file, 'r') as file:
         reader = csv.reader(file)
+        next(reader)  # skip the header
         for row in reader:
-            requests = row[1]
-
-
+            requests.append(row[1].strip())
 
     # Embed requests
     request_embeddings = embed_requests(requests)
@@ -157,7 +165,8 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
 
     # Label clusters
-    cluster_labels = label_clusters_with_tfidf(requests, request_embeddings, clusters)
+    cluster_labels = temp_label(clusters)
+    print(cluster_labels)
 
     # Prepare JSON structure for clusters
     cluster_list = []
@@ -182,7 +191,6 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     # Save results to output file
     with open(output_file, 'w') as file:
         json.dump(json_data, file, indent=4)
-
 
 
 if __name__ == '__main__':
