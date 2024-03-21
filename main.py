@@ -98,7 +98,7 @@ def cluster_requests(request_embeddings, min_size):
     # Initialize clusters and cluster centers
     clusters = defaultdict(list)
     cluster_centers = [request_embeddings[0]]
-    similarity_threshold = 0.5
+    similarity_threshold = 0.895  # test, it was 0.5
 
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
@@ -138,10 +138,15 @@ def label_clusters(requests, clusters, cluster_centers, request_embeddings):
 
 def temp_label(clusters):
     labeled_clusters = {}
-    label_counter = 1
+    label_counter = 0
     for cluster_idx, requests in clusters.items():
-        labeled_clusters[label_counter] = requests
+        # Only take the index of the first request
+        if requests:  # Check if the cluster is not empty
+            labeled_clusters[label_counter] = [requests[0]]
+        else:
+            labeled_clusters[label_counter] = []  # Empty cluster
         label_counter += 1
+
     return labeled_clusters
 
 
@@ -166,7 +171,6 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
 
     # Label clusters
     cluster_labels = temp_label(clusters)
-    print(cluster_labels)
 
     # Prepare JSON structure for clusters
     cluster_list = []
@@ -177,6 +181,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
             cluster_data["requests"] = [requests[idx] for idx in indices]  # List of requests in the cluster
             cluster_list.append(cluster_data)
 
+    print(len(cluster_list))
     # Prepare JSON structure for unclustered requests
     unclustered = []
     for label, indices in clusters.items():
