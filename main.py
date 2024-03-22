@@ -94,12 +94,33 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
         return None  # Request initiates its own cluster
 
 
-def cluster_requests(request_embeddings, min_size):
+# def cluster_requests(request_embeddings, min_size):
+#     # Initialize clusters and cluster centers
+#     clusters = defaultdict(list)
+#     random_init_ind = random.randint(0, len(request_embeddings) - 1)
+#     cluster_centers = [request_embeddings[random_init_ind]]
+#     similarity_threshold = 0.895  # so far the best threshold
+#
+#     # Assign requests to clusters
+#     for request, request_embedding in enumerate(request_embeddings):
+#         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+#         if cluster_idx is not None:
+#             clusters[cluster_idx].append(request)  # Assign to existing cluster
+#             # Update cluster centroid
+#             cluster_centers[cluster_idx] = np.mean(request_embeddings[clusters[cluster_idx]], axis=0)
+#         else:
+#             # Initiate new cluster
+#             clusters[len(cluster_centers)].append(request)
+#             cluster_centers.append(request_embedding)
+#
+#     return clusters, cluster_centers
+
+def cluster_requests(request_embeddings, min_size, max_iterations=10):
     # Initialize clusters and cluster centers
     clusters = defaultdict(list)
     random_init_ind = random.randint(0, len(request_embeddings) - 1)
     cluster_centers = [request_embeddings[random_init_ind]]
-    similarity_threshold = 0.895  # so far the best threshold
+    similarity_threshold = 0.86  # 0.86 so far the best threshold
 
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
@@ -113,7 +134,29 @@ def cluster_requests(request_embeddings, min_size):
             clusters[len(cluster_centers)].append(request)
             cluster_centers.append(request_embedding)
 
-    return clusters, cluster_centers
+    # Post-processing: Iterate over requests to refine cluster assignments
+    for _ in range(max_iterations):
+        updated = False
+        for cluster_idx, cluster_members in clusters.items():
+            for member in cluster_members[:]:  # Use copy for iteration since we may modify the list
+                request_embedding = request_embeddings[member]
+                new_cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+                if new_cluster_idx is not None and new_cluster_idx != cluster_idx:
+                    # Move member to the new cluster
+                    clusters[new_cluster_idx].append(member)
+                    cluster_members.remove(member)
+                    updated = True
+                    # Update cluster centroids
+                    cluster_centers[cluster_idx] = np.mean(request_embeddings[cluster_members], axis=0)
+                    cluster_centers[new_cluster_idx] = np.mean(request_embeddings[clusters[new_cluster_idx]], axis=0)
+        if not updated:
+            break  # Stop iteration if no updates were made
+
+    # Filter clusters with less than min_size values
+    # filtered_clusters = {idx: members for idx, members in clusters.items() if len(members) >= min_size}
+    # unclustered = [member for members in clusters.values() for member in members if len(members) < min_size]
+
+    return clusters, cluster_centers  #, unclustered
 
 
 def label_clusters(requests, clusters, cluster_centers, request_embeddings):
@@ -168,7 +211,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     request_embeddings = embed_requests(requests)
 
     # Cluster requests
-    clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
+    clusters, cluster_centers = cluster_requests(request_embeddings, min_size, 50)
 
     # Label clusters
     cluster_labels = temp_label(clusters)
@@ -208,5 +251,5 @@ if __name__ == '__main__':
                                   config['min_cluster_size'])
 
     # todo: evaluate your clustering solution against the provided one
-    evaluate_clustering(config['example_solution_file'], config['example_solution_file'])  # invocation example
-    #evaluate_clustering(config['example_solution_file'], config['output_file'])
+    # evaluate_clustering(config['example_solution_file'], config['example_solution_file'])  # invocation example
+    evaluate_clustering(config['example_solution_file'], config['output_file'])
