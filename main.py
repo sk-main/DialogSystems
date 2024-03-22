@@ -1,7 +1,7 @@
 import json
 
 import numpy as np
-
+import random
 from compare_clustering_solutions import evaluate_clustering
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
@@ -12,6 +12,7 @@ from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 import csv
+
 
 def label_clusters_with_tfidf(requests, request_embeddings, clusters):
     # Convert requests to text format
@@ -77,7 +78,6 @@ def embed_requests(requests):
     model = SentenceTransformer('all-MiniLM-L6-v2')
     # Convert requests to embeddings
     request_embeddings = model.encode(requests, show_progress_bar=True)
-    request_embeddings = request_embeddings.reshape(-1, 1)
     # Normalize embeddings
     return normalize(request_embeddings)
 
@@ -97,8 +97,9 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
 def cluster_requests(request_embeddings, min_size):
     # Initialize clusters and cluster centers
     clusters = defaultdict(list)
-    cluster_centers = [request_embeddings[0]]
-    similarity_threshold = 0.5
+    random_init_ind = random.randint(0, len(request_embeddings) - 1)
+    cluster_centers = [request_embeddings[random_init_ind]]
+    similarity_threshold = 0.895  # so far the best threshold
 
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
@@ -136,19 +137,32 @@ def label_clusters(requests, clusters, cluster_centers, request_embeddings):
     return cluster_labels
 
 
+def temp_label(clusters):
+    labeled_clusters = {}
+    label_counter = 0
+    for cluster_idx, requests in clusters.items():
+        # Only take the index of the first request
+        if requests:  # Check if the cluster is not empty
+            labeled_clusters[label_counter] = [requests[0]]
+        else:
+            labeled_clusters[label_counter] = []  # Empty cluster
+        label_counter += 1
+
+    return labeled_clusters
+
+
 def analyze_unrecognized_requests(data_file, output_file, min_size):
     # todo: implement this function
     #  you are encouraged to break the functionality into multiple functions,
     #  but don't split your code into multiple *.py files
     #
     #  todo: the final outcome is the json file with clustering results saved as output_file
-
+    requests = []
     with open(data_file, 'r') as file:
         reader = csv.reader(file)
+        next(reader)  # skip the header
         for row in reader:
-            requests = row[1]
-
-
+            requests.append(row[1].strip().lower())
 
     # Embed requests
     request_embeddings = embed_requests(requests)
@@ -157,7 +171,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
 
     # Label clusters
-    cluster_labels = label_clusters_with_tfidf(requests, request_embeddings, clusters)
+    cluster_labels = temp_label(clusters)
 
     # Prepare JSON structure for clusters
     cluster_list = []
@@ -168,6 +182,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
             cluster_data["requests"] = [requests[idx] for idx in indices]  # List of requests in the cluster
             cluster_list.append(cluster_data)
 
+    print(len(cluster_list))
     # Prepare JSON structure for unclustered requests
     unclustered = []
     for label, indices in clusters.items():
@@ -182,7 +197,6 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     # Save results to output file
     with open(output_file, 'w') as file:
         json.dump(json_data, file, indent=4)
-
 
 
 if __name__ == '__main__':
