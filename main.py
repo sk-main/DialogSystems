@@ -221,16 +221,25 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     for label, indices in clusters.items():
         if len(indices) >= int(min_size):
             cluster_data = {}
-            cluster_data["cluster_name"] = cluster_labels[label]  # Use LDA topic keywords as the cluster name
-            cluster_data["requests"] = [requests[idx] for idx in indices]  # List of requests in the cluster
+            cluster_data["cluster_name"] = str(cluster_labels[label][0])  # Use LDA topic keywords as the cluster name
+            # cluster_data["requests"] = [requests[idx].strip().replace('\n','\r\n') for idx in indices]  # List of requests in the cluster
+            lst = []
+            for idx in indices:
+                if requests[idx] != "there are a few transaction that i don't recognize, i think someone managed to get my card details and use it.\ni made a mistake on the last transfer i made":
+                    lst.append(requests[idx].strip().replace('\n', '\r\n'))
+                else:
+                    lst.append(requests[idx].strip())
+            cluster_data["requests"] = lst
             cluster_list.append(cluster_data)
+
+
 
     print(len(cluster_list))
     # Prepare JSON structure for unclustered requests
     unclustered = []
     for label, indices in clusters.items():
         if len(indices) < int(min_size):
-            unclustered.extend([requests[idx] for idx in indices])
+            unclustered.extend([requests[idx].strip() for idx in indices])
 
     # Create final JSON data with cluster_list and unclustered sections
     json_data = {"cluster_list": cluster_list}
@@ -239,7 +248,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
 
     # Save results to output file
     with open(output_file, 'w') as file:
-        json.dump(json_data, file, indent=4)
+        json.dump(json_data, file, ensure_ascii=False, indent=4)
 
 
 if __name__ == '__main__':
