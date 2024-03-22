@@ -1,7 +1,7 @@
 import json
 
 import numpy as np
-
+import random
 from compare_clustering_solutions import evaluate_clustering
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
@@ -97,8 +97,9 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
 def cluster_requests(request_embeddings, min_size):
     # Initialize clusters and cluster centers
     clusters = defaultdict(list)
-    cluster_centers = [request_embeddings[0]]
-    similarity_threshold = 0.895  # test, it was 0.5
+    random_init_ind = random.randint(0, len(request_embeddings) - 1)
+    cluster_centers = [request_embeddings[random_init_ind]]
+    similarity_threshold = 0.895  # so far the best threshold
 
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
@@ -161,7 +162,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
         reader = csv.reader(file)
         next(reader)  # skip the header
         for row in reader:
-            requests.append(row[1].strip())
+            requests.append(row[1].strip().lower())
 
     # Embed requests
     request_embeddings = embed_requests(requests)
