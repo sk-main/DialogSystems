@@ -4,17 +4,130 @@ import numpy as np
 import random
 from compare_clustering_solutions import evaluate_clustering
 from sentence_transformers import SentenceTransformer
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import normalize
 from collections import defaultdict
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 import csv
+from scipy.spatial.distance import cosine
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import T5ForConditionalGeneration, T5Tokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import MarianMTModel, MarianTokenizer
+from transformers import BartForConditionalGeneration, BartTokenizer
 
 
-def label_clusters_with_tfidf(requests, request_embeddings, clusters):
+
+def generate_title_with_bart(sentences, model, tokenizer):
+    # Concatenate sentences with a delimiter
+    input_text = " ".join(sentences)
+
+    # Tokenize input text
+    input_ids = tokenizer(input_text, return_tensors="pt", max_length=1024, truncation=True).input_ids
+
+    # Generate summary
+    summary_ids = model.generate(input_ids, max_length=10, num_beams=1, early_stopping=True)
+
+    # Decode summary
+    summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+
+    return summary
+
+def generate_cluster_titles_with_bart(clusters, centroids, request_embeddings, requests):
+    # Load pre-trained BART-large model and tokenizer
+    model_name = "facebook/bart-large-cnn"
+    model = BartForConditionalGeneration.from_pretrained(model_name)
+    tokenizer = BartTokenizer.from_pretrained(model_name)
+
+    cluster_labels = []
+
+    for centroid, (cluster_idx, cluster_requests) in zip(centroids, clusters.items()):
+        cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
+        input_sentences = [requests[idx] for idx in cluster_requests]
+        generated_label = generate_title_with_bart(input_sentences, model, tokenizer)
+        cluster_labels.append(generated_label)
+
+    return cluster_labels
+
+
+
+
+
+def generate_label(cluster_requests, requests, model, tokenizer):
+    input_sentences = [requests[idx] for idx in cluster_requests]
+    # Encode input sentences
+    input_ids = tokenizer(input_sentences, return_tensors="pt", padding=True, truncation=True).input_ids
+
+    # Generate labels
+    generated_ids = model.generate(input_ids, max_length=20, num_return_sequences=1)
+
+    # Decode generated labels
+    generated_labels = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+
+    return generated_labels
+
+def generate_cluster_labels_using_transformers(clusters, centroids, request_embeddings, requests):
+    # Load a pretrained XLM model for translation
+    model_name = "Helsinki-NLP/opus-mt-en-de"  # Example: translate from English to German
+    model = MarianMTModel.from_pretrained(model_name)
+    tokenizer = MarianTokenizer.from_pretrained(model_name)
+
+    cluster_labels = []
+
+    for centroid, (cluster_idx, cluster_requests) in zip(centroids, clusters.items()):
+        cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
+        generated_label = generate_label(cluster_requests, requests, model, tokenizer)
+        cluster_labels.append(generated_label)
+
+    return cluster_labels
+
+
+
+def closest_sentence_to_centroid(cluster_requests, cluster_embeddings, centroid, requests):
+    closest_idx = None
+    min_distance = float('inf')
+
+    for idx, embedding in enumerate(cluster_embeddings):
+        distance = cosine(embedding, centroid)  # Calculate cosine similarity
+        if distance < min_distance:
+            min_distance = distance
+            closest_idx = idx
+
+    closest_sentence = requests[cluster_requests[closest_idx]]
+    return closest_sentence
+
+def generate_cluster_labels(clusters, centroids, request_embeddings, requests):
+    cluster_labels = []
+
+    for centroid, (cluster_idx, cluster_requests) in zip(centroids, clusters.items()):
+        cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
+        closest_label = closest_sentence_to_centroid(cluster_requests, cluster_embeddings, centroid, requests)
+        cluster_labels.append(closest_label)
+
+    return cluster_labels
+
+
+def label_clusters_with_closest_to_centroid(requests, clusters, cluster_centers, request_embeddings):
+    # Label clusters
+    cluster_labels = {}
+    for label, indices in clusters.items():
+        # Compute centroid representation of the cluster
+        centroid_idx = cluster_centers[label]
+        centroid_embedding = centroid_idx.reshape(1, -1)
+        # Find nearest request to centroid
+        nearest_request_idx = indices[0]
+        nearest_distance = float('inf')
+        for idx in indices:
+            dist = np.linalg.norm(request_embeddings[idx] - centroid_embedding)
+            if dist < nearest_distance:
+                nearest_distance = dist
+                nearest_request_idx = idx
+        # Label the cluster with the nearest request
+        cluster_labels[label] = requests[nearest_request_idx]
+
+    return cluster_labels
+def label_clusters_with_tfidf(requests, clusters):
     # Convert requests to text format
     request_texts = [' '.join(request.split()) for request in requests]
 
@@ -27,23 +140,43 @@ def label_clusters_with_tfidf(requests, request_embeddings, clusters):
 
     # Get top keywords for each cluster based on TF-IDF scores
     cluster_labels = {}
-    for label, indices in clusters.items():
-        # Calculate mean TF-IDF scores for each term across documents in the cluster
-        cluster_tfidf_scores = X_tfidf[indices].mean(axis=0)
 
-        # Get indices of top TF-IDF scores
-        top_tfidf_indices = cluster_tfidf_scores.argsort()[0, ::-1][:5]  # Top 5 keywords for each cluster
+    # for i, req in enumerate(requests):
+    #     print(i, " ", req)
 
-        # Get corresponding feature names (words) for top TF-IDF indices
-        top_keywords = [feature_names[idx] for idx in top_tfidf_indices]
+    # Calculate TF-IDF scores for each cluster
+    for label, cluster in clusters.items():
+        print(label, " ", cluster)
+        # Get indices of requests in the current cluster
+        # cluster_indices = [i for i, req in enumerate(requests) if req in clusters]
+        cluster_indices = cluster
 
-        # Join top keywords to create cluster label
-        cluster_labels[label] = ', '.join(top_keywords)
+        # print(cluster_indices)
+
+        # Check if there are valid indices for the current cluster
+        if cluster_indices:
+            # Get TF-IDF scores for the current cluster
+            cluster_tfidf = X_tfidf[cluster_indices]
+
+            # Calculate mean TF-IDF scores for each term across documents in the cluster
+            cluster_tfidf_scores = np.asarray(cluster_tfidf.mean(axis=0)).ravel()
+
+            # Get indices of top TF-IDF scores
+            top_tfidf_indices = cluster_tfidf_scores.argsort()[::-1][:5]  # Top 5 keywords for each cluster
+
+            # Get corresponding feature names (words) for top TF-IDF indices
+            top_keywords = [feature_names[idx] for idx in top_tfidf_indices]
+
+            # Join top keywords to create cluster label
+            cluster_labels[label] = ' '.join(top_keywords)
+        else:
+            # Handle case where no requests are found in the cluster
+            cluster_labels[label] = "No requests found in the cluster"
 
     return cluster_labels
 
 
-def label_clusters_with_lda(requests, request_embeddings, clusters):
+def label_clusters_with_lda(requests, clusters):
     # Convert requests to text format
     request_texts = [' '.join(request.split()) for request in requests]
 
@@ -61,7 +194,7 @@ def label_clusters_with_lda(requests, request_embeddings, clusters):
     feature_names = vectorizer.get_feature_names_out()
     topic_keywords = []
     for topic_idx, topic in enumerate(lda.components_):
-        top_keywords_idx = topic.argsort()[::-1][:5]  # Top 5 keywords for each topic
+        top_keywords_idx = topic.argsort()[::-1][:2]  # Top 2 keywords for each topic
         top_keywords = [feature_names[i] for i in top_keywords_idx]
         topic_keywords.append(top_keywords)
 
@@ -171,7 +304,8 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
 
     # Label clusters
-    cluster_labels = temp_label(clusters)
+    # cluster_labels = label_clusters_with_lda(requests, clusters)
+    cluster_labels = generate_cluster_titles_with_bart(clusters, cluster_centers, request_embeddings, requests)
 
     # Prepare JSON structure for clusters
     cluster_list = []
