@@ -2,6 +2,11 @@ import json
 
 import numpy as np
 import random
+import nltk
+import string
+import re
+from nltk.util import ngrams
+from nltk.corpus import stopwords
 from compare_clustering_solutions import evaluate_clustering
 from sentence_transformers import SentenceTransformer
 from sklearn.preprocessing import normalize
@@ -16,6 +21,95 @@ from transformers import T5ForConditionalGeneration, T5Tokenizer
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from transformers import MarianMTModel, MarianTokenizer
 from transformers import BartForConditionalGeneration, BartTokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+
+nltk.download('stopwords')
+nltk.download('averaged_perceptron_tagger')
+
+def clean_text(text):
+    # Remove punctuation
+    text = text.translate(str.maketrans("", "", string.punctuation))
+
+    # Expand contractions
+    contractions = {
+        "I'm": "I am",
+        # Add more contractions as needed
+    }
+    for contraction, expansion in contractions.items():
+        text = re.sub(r"\b" + re.escape(contraction) + r"\b", expansion, text)
+
+    # Remove extra spaces
+    text = " ".join(text.split())
+
+    return text
+
+def generate_title_using_ngram(sentences):
+    # Combine all sentences into a single text
+    combined_text = " ".join(sentences)
+
+    # Tokenize the combined text into words
+    tokenized_words = nltk.word_tokenize(combined_text)
+
+    # Remove stopwords (common words like 'the', 'and', etc.)
+    stop_words = set(stopwords.words("english"))
+    filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
+
+    # Generate n-grams (bigrams to 9-grams)
+    n_values = [3, 4, 5, 6, 7, 8, 9]
+    ngram_candidates = []
+    for n in n_values:
+        ngram_candidates.extend(ngrams(filtered_words, n))
+
+    # Choose the n-gram with the highest frequency, avoiding certain endings
+    valid_ngrams = [ngram for ngram in ngram_candidates if not ngram[-1].lower().endswith(("i", "to", "for", "and", "or"))]
+    valid_ngrams = [ngram for ngram in valid_ngrams if not nltk.pos_tag([ngram[-1]])[0][1].startswith("VB")]
+
+    if valid_ngrams:
+        most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
+        # Create the title (2 to 4 words)
+        title = " ".join(most_common_ngram[:9])  # Limit to at most 5 words
+    else:
+        # Handle the case where there are no valid n-grams
+        title = "No title available"  # Or set a default value
+
+    return title
+
+
+def generate_title_using_gpt2(sentences, model, tokenizer):
+        # Concatenate sentences with a delimiter
+        input_text = " ".join(sentences)
+
+        # Tokenize input text
+        input_ids = tokenizer(input_text, return_tensors="pt", truncation=True).input_ids
+
+        # Generate summary
+        summary_ids = model.generate(input_ids, max_new_tokens=10, num_beams=1, early_stopping=True)
+
+        # Decode summary
+        summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+
+        return summary
+
+def generate_cluster_titles_using_gpt2(clusters, centroids, request_embeddings, requests):
+    # Load pre-trained GPT2 model and tokenizer
+    model_name = "gpt2-large"
+    model = GPT2LMHeadModel.from_pretrained(model_name)
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+
+    cluster_labels = []
+
+    for centroid, (cluster_idx, cluster_requests) in zip(centroids, clusters.items()):
+        cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
+        input_sentences = [clean_text(requests[idx]) for idx in cluster_requests]
+        # generated_label = generate_title_using_gpt2(input_sentences, model, tokenizer)
+        generated_label = generate_title_using_ngram(input_sentences)
+        cluster_labels.append(generated_label)
+
+    return cluster_labels
+
+
+
 
 
 
@@ -305,14 +399,14 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
 
     # Label clusters
     # cluster_labels = label_clusters_with_lda(requests, clusters)
-    cluster_labels = generate_cluster_titles_with_bart(clusters, cluster_centers, request_embeddings, requests)
+    cluster_labels = generate_cluster_titles_using_gpt2(clusters, cluster_centers, request_embeddings, requests)
 
     # Prepare JSON structure for clusters
     cluster_list = []
     for label, indices in clusters.items():
         if len(indices) >= int(min_size):
             cluster_data = {}
-            cluster_data["cluster_name"] = cluster_labels[label]  # Use LDA topic keywords as the cluster name
+            cluster_data["cluster_name"] = cluster_labels[label - 1]  # Use LDA topic keywords as the cluster name
             cluster_data["requests"] = [requests[idx] for idx in indices]  # List of requests in the cluster
             cluster_list.append(cluster_data)
 
