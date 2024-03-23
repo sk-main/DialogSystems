@@ -11,6 +11,7 @@ from collections import defaultdict
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import csv
 
 
@@ -82,8 +83,20 @@ def embed_requests(requests):
     return normalize(request_embeddings)
 
 
+
+# def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
+#     # Calculate cosine similarities to each cluster centroid
+#     similarities = [cosine_similarity([request_embedding], [centroid])[0][0] for centroid in cluster_centers]
+#     # Find the closest cluster
+#     closest_cluster_idx = np.argmax(similarities)  # Use argmax since cosine similarity gives higher values for more similar vectors
+#     # Check if the similarity is above the threshold
+#     if similarities[closest_cluster_idx] >= similarity_threshold:
+#         return closest_cluster_idx  # Assign to existing cluster
+#     else:
+#         return None  # Request initiates its own cluster
+
 def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
-    # Calculate distances to each cluster centroid
+    # Calculate euclidean distances to each cluster centroid
     distances = [np.linalg.norm(request_embedding - centroid) for centroid in cluster_centers]
     # Find the closest cluster
     closest_cluster_idx = np.argmin(distances)
@@ -120,8 +133,8 @@ def cluster_requests(request_embeddings, min_size, max_iterations=10):
     clusters = defaultdict(list)
     random_init_ind = random.randint(0, len(request_embeddings) - 1)
     cluster_centers = [request_embeddings[random_init_ind]]
-    similarity_threshold = 0.86  # 0.86 so far the best threshold
-
+    similarity_threshold = 0.81  # 0.86 so far the best threshold on covid with euclidean, 0.55 cosine
+    # 0.75 best on banking
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
@@ -152,11 +165,7 @@ def cluster_requests(request_embeddings, min_size, max_iterations=10):
         if not updated:
             break  # Stop iteration if no updates were made
 
-    # Filter clusters with less than min_size values
-    # filtered_clusters = {idx: members for idx, members in clusters.items() if len(members) >= min_size}
-    # unclustered = [member for members in clusters.values() for member in members if len(members) < min_size]
-
-    return clusters, cluster_centers  #, unclustered
+    return clusters, cluster_centers
 
 
 def label_clusters(requests, clusters, cluster_centers, request_embeddings):
@@ -232,14 +241,11 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
             cluster_data["requests"] = lst
             cluster_list.append(cluster_data)
 
-
-
-    print(len(cluster_list))
     # Prepare JSON structure for unclustered requests
     unclustered = []
     for label, indices in clusters.items():
         if len(indices) < int(min_size):
-            unclustered.extend([requests[idx].strip() for idx in indices])
+            unclustered.extend([requests[idx].strip().replace('\n', '\r\n') for idx in indices])
 
     # Create final JSON data with cluster_list and unclustered sections
     json_data = {"cluster_list": cluster_list}
