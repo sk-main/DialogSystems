@@ -39,6 +39,44 @@ def clean_text(text):
 
     return text
 
+def generate_title_using_ngramV2(sentences, labelsDict):
+    # Combine all sentences into a single text
+    combined_text = " ".join(sentences)
+
+    # Tokenize the combined text into words
+    tokenized_words = nltk.word_tokenize(combined_text)
+
+    # Remove stopwords (common words like 'the', 'and', etc.)
+    stop_words = set(stopwords.words("english"))
+    filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
+
+    # Generate 3-grams and 4-grams
+    three_grams = list(ngrams(filtered_words, 3))
+    four_grams = list(ngrams(filtered_words, 4))
+
+    # Count the frequency of each 4-gram
+    four_gram_freq = nltk.FreqDist(four_grams)
+
+    # If a 4-gram appears at least twice, add it to the list of valid n-grams
+    valid_ngrams = [ngram for ngram in four_grams if four_gram_freq[ngram] >= len(sentences) // 3]
+
+    # If no 4-gram appears at least twice, use the 3-grams as the valid n-grams
+    if not valid_ngrams:
+        valid_ngrams = three_grams
+
+    if valid_ngrams:
+        most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
+        while most_common_ngram in labelsDict and len(valid_ngrams) > 1:
+            valid_ngrams.remove(most_common_ngram)
+            most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
+        # Create the title (2 to 6 words)
+        title = " ".join(most_common_ngram[:6])  # Limit to at most 6 words
+    else:
+        # Handle the case where there are no valid n-grams
+        title = "No title available"  # Or set a default value
+
+    return title
+
 def generate_title_using_ngram(sentences, labelsDict):
     # Combine all sentences into a single text
     combined_text = " ".join(sentences)
@@ -81,7 +119,7 @@ def generate_cluster_titles_using_ngram(clusters, centroids, request_embeddings,
         cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
         input_sentences = [clean_text(requests[idx]) for idx in cluster_requests]
         # generated_label = generate_title_using_gpt2(input_sentences, model, tokenizer)
-        generated_label = generate_title_using_ngram(input_sentences, cluster_labels)
+        generated_label = generate_title_using_ngramV2(input_sentences, cluster_labels)
         cluster_labels[cluster_idx] = generated_label
         # cluster_labels.append(generated_label)
 
