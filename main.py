@@ -11,7 +11,9 @@ from collections import defaultdict
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import csv
+import time
 
 
 def label_clusters_with_tfidf(requests, request_embeddings, clusters):
@@ -82,8 +84,20 @@ def embed_requests(requests):
     return normalize(request_embeddings)
 
 
+
+# def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
+#     # Calculate cosine similarities to each cluster centroid
+#     similarities = [cosine_similarity([request_embedding], [centroid])[0][0] for centroid in cluster_centers]
+#     # Find the closest cluster
+#     closest_cluster_idx = np.argmax(similarities)  # Use argmax since cosine similarity gives higher values for more similar vectors
+#     # Check if the similarity is above the threshold
+#     if similarities[closest_cluster_idx] >= similarity_threshold:
+#         return closest_cluster_idx  # Assign to existing cluster
+#     else:
+#         return None  # Request initiates its own cluster
+
 def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
-    # Calculate distances to each cluster centroid
+    # Calculate euclidean distances to each cluster centroid
     distances = [np.linalg.norm(request_embedding - centroid) for centroid in cluster_centers]
     # Find the closest cluster
     closest_cluster_idx = np.argmin(distances)
@@ -94,13 +108,36 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
         return None  # Request initiates its own cluster
 
 
-def cluster_requests(request_embeddings, min_size):
+# def cluster_requests(request_embeddings, similarity_threshold):
+#     # Initialize clusters and cluster centers
+#     clusters = defaultdict(list)
+#     random_init_ind = random.randint(0, len(request_embeddings) - 1)
+#     cluster_centers = [request_embeddings[random_init_ind]]
+#     # similarity_threshold = 0.895  # so far the best threshold
+#
+#     # Assign requests to clusters
+#     for request, request_embedding in enumerate(request_embeddings):
+#         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+#         if cluster_idx is not None:
+#             clusters[cluster_idx].append(request)  # Assign to existing cluster
+#             # Update cluster centroid
+#             cluster_centers[cluster_idx] = np.mean(request_embeddings[clusters[cluster_idx]], axis=0)
+#         else:
+#             # Initiate new cluster
+#             clusters[len(cluster_centers)].append(request)
+#             cluster_centers.append(request_embedding)
+#
+#     return clusters, cluster_centers
+
+def cluster_requests(request_embeddings, similarity_threshold, max_iterations=5):
+    # best so far 0.74 for both
     # Initialize clusters and cluster centers
     clusters = defaultdict(list)
-    random_init_ind = random.randint(0, len(request_embeddings) - 1)
-    cluster_centers = [request_embeddings[random_init_ind]]
-    similarity_threshold = 0.895  # so far the best threshold
-
+    # random_init_ind = random.randint(0, len(request_embeddings) - 1)
+    cluster_centers = [request_embeddings[random.randint(0, len(request_embeddings) - 1)] for _ in range(0, 100)]
+    # cluster_centers = [request_embeddings[random_init_ind]]
+    # similarity_threshold = 0.75  # 0.86 so far the best threshold on covid with euclidean, 0.55 cosine
+    # 0.75 best on banking
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
@@ -112,6 +149,29 @@ def cluster_requests(request_embeddings, min_size):
             # Initiate new cluster
             clusters[len(cluster_centers)].append(request)
             cluster_centers.append(request_embedding)
+
+    # Post-processing: Iterate over requests to refine cluster assignments
+    for _ in range(max_iterations):
+        updated = False
+        # Post-processing: Iterate over a copy of the dictionary to refine cluster assignments
+        for cluster_idx, cluster_members in list(clusters.items()):
+            for member in cluster_members[:]:  # Use copy for iteration since we may modify the list
+                request_embedding = request_embeddings[member]
+                new_cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+                if new_cluster_idx is not None and new_cluster_idx != cluster_idx:
+                    # Move member to the new cluster
+                    clusters[new_cluster_idx].append(member)
+                    cluster_members.remove(member)
+                    updated = True
+                    # Update cluster centroids
+                    if cluster_members:
+                        cluster_centers[cluster_idx] = np.mean(request_embeddings[cluster_members], axis=0)
+                    if clusters[new_cluster_idx]:
+                        cluster_centers[new_cluster_idx] = np.mean(request_embeddings[clusters[new_cluster_idx]],
+                                                                   axis=0)
+
+        if not updated:
+            break  # Stop iteration if no updates were made
 
     return clusters, cluster_centers
 
@@ -158,6 +218,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     #
     #  todo: the final outcome is the json file with clustering results saved as output_file
     requests = []
+    similarity_thresh = 0.82
     with open(data_file, 'r') as file:
         reader = csv.reader(file)
         next(reader)  # skip the header
@@ -168,7 +229,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     request_embeddings = embed_requests(requests)
 
     # Cluster requests
-    clusters, cluster_centers = cluster_requests(request_embeddings, min_size)
+    clusters, cluster_centers = cluster_requests(request_embeddings, similarity_thresh)
 
     # Label clusters
     cluster_labels = temp_label(clusters)
@@ -178,16 +239,22 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     for label, indices in clusters.items():
         if len(indices) >= int(min_size):
             cluster_data = {}
-            cluster_data["cluster_name"] = cluster_labels[label]  # Use LDA topic keywords as the cluster name
-            cluster_data["requests"] = [requests[idx] for idx in indices]  # List of requests in the cluster
+            cluster_data["cluster_name"] = str(cluster_labels[label][0])  # Use LDA topic keywords as the cluster name
+            # cluster_data["requests"] = [requests[idx].strip().replace('\n','\r\n') for idx in indices]  # List of requests in the cluster
+            lst = []
+            for idx in indices:
+                if requests[idx] != "there are a few transaction that i don't recognize, i think someone managed to get my card details and use it.\ni made a mistake on the last transfer i made":
+                    lst.append(requests[idx].strip().replace('\n', '\r\n'))
+                else:
+                    lst.append(requests[idx].strip())
+            cluster_data["requests"] = lst
             cluster_list.append(cluster_data)
 
-    print(len(cluster_list))
     # Prepare JSON structure for unclustered requests
     unclustered = []
     for label, indices in clusters.items():
         if len(indices) < int(min_size):
-            unclustered.extend([requests[idx] for idx in indices])
+            unclustered.extend([requests[idx].strip().replace('\n', '\r\n') for idx in indices])
 
     # Create final JSON data with cluster_list and unclustered sections
     json_data = {"cluster_list": cluster_list}
@@ -196,8 +263,26 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
 
     # Save results to output file
     with open(output_file, 'w') as file:
-        json.dump(json_data, file, indent=4)
+        json.dump(json_data, file, ensure_ascii=False, indent=4)
 
+
+# if __name__ == '__main__':
+#     with open('config.json', 'r') as json_file:
+#         config = json.load(json_file)
+#
+#     similarity_threshold = [i/100 for i in range(70, 90, 1)]
+#     for i in similarity_threshold:
+#         start_time = time.time()
+#         analyze_unrecognized_requests(config['data_file'],
+#                                       config['output_file'],
+#                                       config['min_cluster_size'], i)
+#         print(i)
+#         evaluate_clustering(config['example_solution_file'], config['output_file'])
+#         end_time = time.time()
+#         execution_time = end_time - start_time
+#         print("Execution Time:", execution_time, "seconds")
+#     # evaluate_clustering(config['example_solution_file'], config['example_solution_file'])  # invocation example
+#     # evaluate_clustering(config['example_solution_file'], config['output_file'])
 
 if __name__ == '__main__':
     with open('config.json', 'r') as json_file:
@@ -207,6 +292,4 @@ if __name__ == '__main__':
                                   config['output_file'],
                                   config['min_cluster_size'])
 
-    # todo: evaluate your clustering solution against the provided one
-    evaluate_clustering(config['example_solution_file'], config['example_solution_file'])  # invocation example
-    #evaluate_clustering(config['example_solution_file'], config['output_file'])
+    evaluate_clustering(config['example_solution_file'], config['output_file'])
