@@ -39,7 +39,7 @@ def clean_text(text):
 
     return text
 
-def generate_title_using_ngram(sentences):
+def generate_title_using_ngram(sentences, labelsDict):
     # Combine all sentences into a single text
     combined_text = " ".join(sentences)
 
@@ -51,7 +51,7 @@ def generate_title_using_ngram(sentences):
     filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
 
     # Generate n-grams (bigrams to 6-grams)
-    n_values = [2, 3, 4, 5, 6]
+    n_values = [3, 4, 5, 6]
     ngram_candidates = []
     for n in n_values:
         ngram_candidates.extend(ngrams(filtered_words, n))
@@ -63,6 +63,9 @@ def generate_title_using_ngram(sentences):
 
     if valid_ngrams:
         most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
+        while most_common_ngram in labelsDict and len(valid_ngrams) > 1:
+            valid_ngrams.remove(most_common_ngram)
+            most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
         # Create the title (2 to 6 words)
         title = " ".join(most_common_ngram[:6])  # Limit to at most 6 words
     else:
@@ -78,7 +81,7 @@ def generate_cluster_titles_using_ngram(clusters, centroids, request_embeddings,
         cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
         input_sentences = [clean_text(requests[idx]) for idx in cluster_requests]
         # generated_label = generate_title_using_gpt2(input_sentences, model, tokenizer)
-        generated_label = generate_title_using_ngram(input_sentences)
+        generated_label = generate_title_using_ngram(input_sentences, cluster_labels)
         cluster_labels[cluster_idx] = generated_label
         # cluster_labels.append(generated_label)
 
