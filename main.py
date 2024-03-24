@@ -53,12 +53,21 @@ def generate_title_using_ngramV2(sentences, labelsDict):
     # Generate 3-grams and 4-grams
     three_grams = list(ngrams(filtered_words, 3))
     four_grams = list(ngrams(filtered_words, 4))
+    five_grams = list(ngrams(filtered_words, 5))
 
-    # Count the frequency of each 4-gram
-    four_gram_freq = nltk.FreqDist(four_grams)
+    # Count the frequency of each 5-gram
+    five_gram_freq = nltk.FreqDist(five_grams)
 
-    # If a 4-gram appears at least twice, add it to the list of valid n-grams
-    valid_ngrams = [ngram for ngram in four_grams if four_gram_freq[ngram] >= len(sentences) // 3]
+    # If a 5-gram appears at least half of the sentences, add it to the list of valid n-grams
+    valid_ngrams = [ngram for ngram in five_grams if five_gram_freq[ngram] >= len(sentences) // 2]
+
+    # If no 5-gram appears at least half of the sentences, use the 4-grams as the valid n-grams
+    if not valid_ngrams:
+        # Count the frequency of each 4-gram
+        four_gram_freq = nltk.FreqDist(four_grams)
+
+        # If a 4-gram appears at least twice, add it to the list of valid n-grams
+        valid_ngrams = [ngram for ngram in four_grams if four_gram_freq[ngram] >= len(sentences) // 3]
 
     # If no 4-gram appears at least twice, use the 3-grams as the valid n-grams
     if not valid_ngrams:
