@@ -13,6 +13,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import csv
+import time
 
 
 def label_clusters_with_tfidf(requests, request_embeddings, clusters):
@@ -261,13 +262,17 @@ if __name__ == '__main__':
     with open('config.json', 'r') as json_file:
         config = json.load(json_file)
 
-    similarity_threshold = [i/100 for i in range(45, 66, 1)]
+    similarity_threshold = [i/100 for i in range(61, 70, 1)]
     for i in similarity_threshold:
+        start_time = time.time()
         analyze_unrecognized_requests(config['data_file'],
                                       config['output_file'],
                                       config['min_cluster_size'], i)
         print(i)
         evaluate_clustering(config['example_solution_file'], config['output_file'])
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print("Execution Time:", execution_time, "seconds")
     # todo: evaluate your clustering solution against the provided one
     # evaluate_clustering(config['example_solution_file'], config['example_solution_file'])  # invocation example
     # evaluate_clustering(config['example_solution_file'], config['output_file'])
