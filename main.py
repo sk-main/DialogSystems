@@ -107,34 +107,13 @@ def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_t
         return None  # Request initiates its own cluster
 
 
-# def cluster_requests(request_embeddings, min_size):
-#     # Initialize clusters and cluster centers
-#     clusters = defaultdict(list)
-#     random_init_ind = random.randint(0, len(request_embeddings) - 1)
-#     cluster_centers = [request_embeddings[random_init_ind]]
-#     similarity_threshold = 0.895  # so far the best threshold
-#
-#     # Assign requests to clusters
-#     for request, request_embedding in enumerate(request_embeddings):
-#         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
-#         if cluster_idx is not None:
-#             clusters[cluster_idx].append(request)  # Assign to existing cluster
-#             # Update cluster centroid
-#             cluster_centers[cluster_idx] = np.mean(request_embeddings[clusters[cluster_idx]], axis=0)
-#         else:
-#             # Initiate new cluster
-#             clusters[len(cluster_centers)].append(request)
-#             cluster_centers.append(request_embedding)
-#
-#     return clusters, cluster_centers
-
-def cluster_requests(request_embeddings, min_size, max_iterations=10):
+def cluster_requests(request_embeddings, similarity_threshold):
     # Initialize clusters and cluster centers
     clusters = defaultdict(list)
     random_init_ind = random.randint(0, len(request_embeddings) - 1)
     cluster_centers = [request_embeddings[random_init_ind]]
-    similarity_threshold = 0.81  # 0.86 so far the best threshold on covid with euclidean, 0.55 cosine
-    # 0.75 best on banking
+    # similarity_threshold = 0.895  # so far the best threshold
+
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
@@ -147,25 +126,46 @@ def cluster_requests(request_embeddings, min_size, max_iterations=10):
             clusters[len(cluster_centers)].append(request)
             cluster_centers.append(request_embedding)
 
-    # Post-processing: Iterate over requests to refine cluster assignments
-    for _ in range(max_iterations):
-        updated = False
-        for cluster_idx, cluster_members in clusters.items():
-            for member in cluster_members[:]:  # Use copy for iteration since we may modify the list
-                request_embedding = request_embeddings[member]
-                new_cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
-                if new_cluster_idx is not None and new_cluster_idx != cluster_idx:
-                    # Move member to the new cluster
-                    clusters[new_cluster_idx].append(member)
-                    cluster_members.remove(member)
-                    updated = True
-                    # Update cluster centroids
-                    cluster_centers[cluster_idx] = np.mean(request_embeddings[cluster_members], axis=0)
-                    cluster_centers[new_cluster_idx] = np.mean(request_embeddings[clusters[new_cluster_idx]], axis=0)
-        if not updated:
-            break  # Stop iteration if no updates were made
-
     return clusters, cluster_centers
+
+# def cluster_requests(request_embeddings, similarity_threshold, max_iterations=10):
+#     # Initialize clusters and cluster centers
+#     clusters = defaultdict(list)
+#     random_init_ind = random.randint(0, len(request_embeddings) - 1)
+#     cluster_centers = [request_embeddings[random_init_ind]]
+#     # similarity_threshold = 0.75  # 0.86 so far the best threshold on covid with euclidean, 0.55 cosine
+#     # 0.75 best on banking
+#     # Assign requests to clusters
+#     for request, request_embedding in enumerate(request_embeddings):
+#         cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+#         if cluster_idx is not None:
+#             clusters[cluster_idx].append(request)  # Assign to existing cluster
+#             # Update cluster centroid
+#             cluster_centers[cluster_idx] = np.mean(request_embeddings[clusters[cluster_idx]], axis=0)
+#         else:
+#             # Initiate new cluster
+#             clusters[len(cluster_centers)].append(request)
+#             cluster_centers.append(request_embedding)
+#
+#     # Post-processing: Iterate over requests to refine cluster assignments
+#     for _ in range(max_iterations):
+#         updated = False
+#         for cluster_idx, cluster_members in clusters.items():
+#             for member in cluster_members[:]:  # Use copy for iteration since we may modify the list
+#                 request_embedding = request_embeddings[member]
+#                 new_cluster_idx = assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold)
+#                 if new_cluster_idx is not None and new_cluster_idx != cluster_idx:
+#                     # Move member to the new cluster
+#                     clusters[new_cluster_idx].append(member)
+#                     cluster_members.remove(member)
+#                     updated = True
+#                     # Update cluster centroids
+#                     cluster_centers[cluster_idx] = np.mean(request_embeddings[cluster_members], axis=0)
+#                     cluster_centers[new_cluster_idx] = np.mean(request_embeddings[clusters[new_cluster_idx]], axis=0)
+#         if not updated:
+#             break  # Stop iteration if no updates were made
+#
+#     return clusters, cluster_centers
 
 
 def label_clusters(requests, clusters, cluster_centers, request_embeddings):
@@ -203,7 +203,7 @@ def temp_label(clusters):
     return labeled_clusters
 
 
-def analyze_unrecognized_requests(data_file, output_file, min_size):
+def analyze_unrecognized_requests(data_file, output_file, min_size, similarity_thresh):
     # todo: implement this function
     #  you are encouraged to break the functionality into multiple functions,
     #  but don't split your code into multiple *.py files
@@ -220,7 +220,7 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
     request_embeddings = embed_requests(requests)
 
     # Cluster requests
-    clusters, cluster_centers = cluster_requests(request_embeddings, min_size, 50)
+    clusters, cluster_centers = cluster_requests(request_embeddings, similarity_thresh)
 
     # Label clusters
     cluster_labels = temp_label(clusters)
@@ -261,10 +261,13 @@ if __name__ == '__main__':
     with open('config.json', 'r') as json_file:
         config = json.load(json_file)
 
-    analyze_unrecognized_requests(config['data_file'],
-                                  config['output_file'],
-                                  config['min_cluster_size'])
-
+    similarity_threshold = [i/100 for i in range(40, 60, 1)]
+    for i in similarity_threshold:
+        analyze_unrecognized_requests(config['data_file'],
+                                      config['output_file'],
+                                      config['min_cluster_size'], i)
+        print(i)
+        evaluate_clustering(config['example_solution_file'], config['output_file'])
     # todo: evaluate your clustering solution against the provided one
     # evaluate_clustering(config['example_solution_file'], config['example_solution_file'])  # invocation example
-    evaluate_clustering(config['example_solution_file'], config['output_file'])
+    # evaluate_clustering(config['example_solution_file'], config['output_file'])
