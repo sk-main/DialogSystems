@@ -14,13 +14,17 @@ import csv
 
 
 def clean_text(text):
+    """
+    Cleans the given text by removing punctuation, expanding contractions, and removing extra spaces.
+    :param text: The text to be cleaned.
+    :return: str: The cleaned text.
+    """
     # Remove punctuation
     text = text.translate(str.maketrans("", "", string.punctuation))
 
     # Expand contractions
     contractions = {
         "I'm": "I am",
-        # Add more contractions as needed
     }
     for contraction, expansion in contractions.items():
         text = re.sub(r"\b" + re.escape(contraction) + r"\b", expansion, text)
@@ -32,6 +36,13 @@ def clean_text(text):
 
 
 def generate_title_using_ngram_v2(sentences, labelsDict):
+    """
+    Generates a title using n-grams extracted from sentences.
+    :param sentences: List of sentences to extract n-grams from.
+    :param labelsDict: Dictionary containing existing titles as keys to avoid duplication.
+    :return: Generated title.
+    """
+
     # Combine all sentences into a single text
     combined_text = " ".join(sentences)
 
@@ -40,19 +51,15 @@ def generate_title_using_ngram_v2(sentences, labelsDict):
 
     # Remove stopwords (common words like 'the', 'and', etc.)
     stop_words = set(stopwords.words("english"))
-    # filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
-    filtered_words = tokenized_words
 
-    # Generate 3-grams and 4-grams
-    three_grams = list(ngrams(filtered_words, 3))
-    four_grams = list(ngrams(filtered_words, 4))
-    five_grams = list(ngrams(filtered_words, 5))
+    three_grams = list(ngrams(tokenized_words, 3))
+    four_grams = list(ngrams(tokenized_words, 4))
+    five_grams = list(ngrams(tokenized_words, 5))
 
     # Count the frequency of each 5-gram
     five_gram_freq = nltk.FreqDist(five_grams)
 
     # If a 5-gram appears at least half of the sentences, add it to the list of valid n-grams
-    # can use this list instead: ("i", "to", "for", "and", "or","im", "a", "for")
     valid_ngrams = [ngram for ngram in five_grams if five_gram_freq[ngram] >= len(sentences) // 2 and
                     ngram[0].lower() not in stop_words and ngram[-1].lower() not in stop_words]
 
@@ -67,8 +74,6 @@ def generate_title_using_ngram_v2(sentences, labelsDict):
 
     # If no 4-gram appears at least twice, use the 3-grams as the valid n-grams
     if not valid_ngrams:
-        trigrams_freq = nltk.FreqDist(three_grams)
-
         # If a 3-gram fills the conditions, add it to the list of valid n-grams
         valid_ngrams = [ngram for ngram in three_grams if ngram[0].lower() not in stop_words and
                         ngram[-1].lower() not in stop_words]
@@ -81,88 +86,71 @@ def generate_title_using_ngram_v2(sentences, labelsDict):
         # Create the title (2 to 6 words)
         title = " ".join(most_common_ngram[:6])  # Limit to at most 6 words
     else:
-        # Handle the case where there are no valid n-grams
         title = "No title available"  # Or set a default value
 
     return title
 
 
-# def generate_title_using_ngram(sentences, labelsDict):
-#     # Combine all sentences into a single text
-#     combined_text = " ".join(sentences)
-#
-#     # Tokenize the combined text into words
-#     tokenized_words = nltk.word_tokenize(combined_text)
-#
-#     # Remove stopwords (common words like 'the', 'and', etc.)
-#     stop_words = set(stopwords.words("english"))
-#     filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
-#
-#     # Generate n-grams (bigrams to 6-grams)
-#     n_values = [3, 4, 5, 6]
-#     ngram_candidates = []
-#     for n in n_values:
-#         ngram_candidates.extend(ngrams(filtered_words, n))
-#
-#     # Choose the n-gram with the highest frequency, avoiding certain endings
-#     valid_ngrams = [ngram for ngram in ngram_candidates if not ngram[-1].lower().endswith(("i", "to", "for", "and", "or",
-#                                                                                            "im"))]
-#     # valid_ngrams = [ngram for ngram in valid_ngrams if not nltk.pos_tag([ngram[-1]])[0][1].startswith("VB")]
-#
-#     if valid_ngrams:
-#         most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
-#         while most_common_ngram in labelsDict and len(valid_ngrams) > 1:
-#             valid_ngrams.remove(most_common_ngram)
-#             most_common_ngram = max(valid_ngrams, key=valid_ngrams.count)
-#         # Create the title (2 to 6 words)
-#         title = " ".join(most_common_ngram[:6])  # Limit to at most 6 words
-#     else:
-#         # Handle the case where there are no valid n-grams
-#         title = "No title available"  # Or set a default value
-#
-#     return title
-
-
 def generate_cluster_titles_using_ngram(clusters, centroids, request_embeddings, requests):
+    """
+    Generates titles for clusters using n-grams.
+    :param clusters: Dictionary of cluster indices and their corresponding request indices.
+    :param centroids: List of cluster centroids.
+    :param request_embeddings: List of request embeddings.
+    :param requests: List of request texts.
+    :return: dict: Dictionary containing cluster indices as keys and generated titles as values.
+    """
     cluster_labels = dict()
 
     for centroid, (cluster_idx, cluster_requests) in zip(centroids, clusters.items()):
-        cluster_embeddings = [request_embeddings[idx] for idx in cluster_requests]
         input_sentences = [clean_text(requests[idx]) for idx in cluster_requests]
-        # generated_label = generate_title_using_gpt2(input_sentences, model, tokenizer)
         generated_label = generate_title_using_ngram_v2(input_sentences, cluster_labels)
         cluster_labels[cluster_idx] = generated_label
-        # cluster_labels.append(generated_label)
 
     return cluster_labels
 
 
-
 def embed_requests(requests):
-    # Load Sentence Transformer model
+    """
+    Embeds requests using Sentence Transformer model.
+    :param requests: List of request texts.
+    :return: numpy.ndarray: Embeddings of the requests.
+    """
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    # Convert requests to embeddings
-    request_embeddings = model.encode(requests, show_progress_bar=True)
-    # Normalize embeddings
+    request_embeddings = model.encode(requests)
     return normalize(request_embeddings)
 
 
 def assign_to_cluster(request_embedding, clusters, cluster_centers, similarity_threshold):
+    """
+    Assigns a request embedding to a cluster.
+    :param request_embedding: Embedding representing the request.
+    :param clusters: Current cluster assignments.
+    :param cluster_centers: Current cluster centroids.
+    :param similarity_threshold: Threshold for considering similarity.
+    :return: int or None: Index of the assigned cluster or None if a new cluster is initiated.
+    """
     # Calculate euclidean distances to each cluster centroid
     distances = [np.linalg.norm(request_embedding - centroid) for centroid in cluster_centers]
-    # Find the closest cluster
     closest_cluster_idx = np.argmin(distances)
-    # Check if the distance is within the similarity threshold
+
     if distances[closest_cluster_idx] <= similarity_threshold:
         return closest_cluster_idx  # Assign to existing cluster
     else:
         return None  # Request initiates its own cluster
 
 
-def cluster_requests(request_embeddings, similarity_threshold, max_iterations=5):
-    # Initialize clusters and cluster centers
+def cluster_requests(request_embeddings, similarity_threshold, max_iterations=10):
+    """
+    Clusters request embeddings based on similarity.
+    :param request_embeddings: List of embeddings representing requests.
+    :param similarity_threshold: Threshold for considering two embeddings as similar.
+    :param max_iterations: Maximum number of iterations for refinement. Defaults to 10.
+    :return: dict: Cluster assignments
+             list: Cluster centroids.
+    """
     clusters = defaultdict(list)
-    # random_init_ind = random.randint(0, len(request_embeddings) - 1)
+    # randomly init cluster_centers with 100 values from the embedding
     cluster_centers = [request_embeddings[random.randint(0, len(request_embeddings) - 1)] for _ in range(0, 100)]
     # Assign requests to clusters
     for request, request_embedding in enumerate(request_embeddings):
@@ -203,6 +191,13 @@ def cluster_requests(request_embeddings, similarity_threshold, max_iterations=5)
 
 
 def analyze_unrecognized_requests(data_file, output_file, min_size):
+    """
+    Analyzes unrecognized requests, clusters them, label them, and saves results in a JSON file.
+    :param data_file: Path to the CSV file with requests data.
+    :param output_file: Path to the output JSON file.
+    :param min_size: Minimum cluster size to consider for inclusion.
+    :return: None
+    """
     requests = []
     similarity_thresh = 0.82
     with open(data_file, 'r') as file:
@@ -211,22 +206,17 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
         for row in reader:
             requests.append(row[1].strip().lower())
 
-    # Embed requests
     request_embeddings = embed_requests(requests)
 
-    # Cluster requests
     clusters, cluster_centers = cluster_requests(request_embeddings, similarity_thresh)
 
-    # Label clusters
     cluster_labels = generate_cluster_titles_using_ngram(clusters, cluster_centers, request_embeddings, requests)
 
-    # Prepare JSON structure for clusters
     cluster_list = []
     for label, indices in clusters.items():
         if len(indices) >= int(min_size):
             cluster_data = {}
             cluster_data["cluster_name"] = cluster_labels[label]
-            # cluster_data["requests"] = [requests[idx].strip().replace('\n','\r\n') for idx in indices]  # List of requests in the cluster
             lst = []
             for idx in indices:
                 if requests[idx] != "there are a few transaction that i don't recognize, i think someone managed to get my card details and use it.\ni made a mistake on the last transfer i made":
@@ -236,7 +226,6 @@ def analyze_unrecognized_requests(data_file, output_file, min_size):
             cluster_data["requests"] = lst
             cluster_list.append(cluster_data)
 
-    # Prepare JSON structure for unclustered requests
     unclustered = []
     for label, indices in clusters.items():
         if len(indices) < int(min_size):
