@@ -48,8 +48,8 @@ def generate_title_using_ngramV2(sentences, labelsDict):
 
     # Remove stopwords (common words like 'the', 'and', etc.)
     stop_words = set(stopwords.words("english"))
-    # filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
-    filtered_words = tokenized_words
+    filtered_words = [word for word in tokenized_words if word.lower() not in stop_words]
+    # filtered_words = tokenized_words
 
     # Generate 3-grams and 4-grams
     three_grams = list(ngrams(filtered_words, 3))
@@ -61,7 +61,7 @@ def generate_title_using_ngramV2(sentences, labelsDict):
 
     # If a 5-gram appears at least half of the sentences, add it to the list of valid n-grams
     valid_ngrams = [ngram for ngram in five_grams if five_gram_freq[ngram] >= len(sentences) // 2 and
-                    not ngram[-1].lower().endswith(("i", "to", "for", "and", "or","im")) and ngram[-1].lower() not in stop_words]
+                    not ngram[-1].lower().endswith(("i", "to", "for", "and", "or","im", "a", "for")) and ngram[-1].lower() not in stop_words]
 
     # If no 5-gram appears at least half of the sentences, use the 4-grams as the valid n-grams
     if not valid_ngrams:
@@ -70,7 +70,7 @@ def generate_title_using_ngramV2(sentences, labelsDict):
 
         # If a 4-gram appears at least twice, add it to the list of valid n-grams
         valid_ngrams = [ngram for ngram in four_grams if four_gram_freq[ngram] >= len(sentences) // 3 and
-                        not ngram[-1].lower().endswith(("i", "to", "for", "and", "or","im")) and ngram[-1].lower() not in stop_words]
+                        not ngram[-1].lower().endswith(("i", "to", "for", "and", "or", "im", "a", "for")) and ngram[-1].lower() not in stop_words]
 
     # If no 4-gram appears at least twice, use the 3-grams as the valid n-grams
     if not valid_ngrams:
